@@ -4,6 +4,38 @@
 
 {% block head %}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/4.3.0/marked.min.js"></script>
+<style>
+.loading-spinner {
+    display: none;
+    margin: 10px 0;
+    text-align: center;
+}
+.loading-spinner .spinner {
+    display: inline-block;
+    vertical-align: middle;
+}
+.status-message {
+    padding: 10px;
+    margin: 10px 0;
+    border-radius: 4px;
+    display: none;
+}
+.status-message.info {
+    background-color: #d1ecf1;
+    border: 1px solid #bee5eb;
+    color: #0c5460;
+}
+.status-message.success {
+    background-color: #d4edda;
+    border: 1px solid #c3e6cb;
+    color: #155724;
+}
+.status-message.danger {
+    background-color: #f8d7da;
+    border: 1px solid #f5c6cb;
+    color: #721c24;
+}
+</style>
 {% endblock %}
 
 {% block content %}
@@ -95,10 +127,19 @@
             <div class="action-buttons">
                 <a class="btn" id="btn-download-md">Tải xuống dưới dạng Markdown</a>
                 <a class="btn" id="btn-download-txt">Tải xuống dưới dạng Text</a>
+                <button class="btn btn-success" id="btn-to-word">Chuyển sang Word (API)</button>
             </div>
+            
+            <!-- Loading spinner và status message cho Word conversion -->
+            <div class="loading-spinner" id="outputLoading">
+                <div class="spinner"></div>
+                <span>Đang xử lý...</span>
+            </div>
+            <div class="status-message" id="status-message"></div>
+            
             <div class="alert alert-info">
-                Lưu ý: Việc chuyển đổi sang Word yêu cầu Pandoc được cài đặt trên máy tính của bạn. 
-                Bạn có thể tải xuống định dạng Markdown và sử dụng các công cụ chuyển đổi như Pandoc.
+                Chức năng chuyển đổi sang Word sử dụng Pandoc API để xử lý trực tiếp trên trình duyệt.
+                Nếu gặp vấn đề, bạn vẫn có thể tải xuống định dạng Markdown và chuyển đổi bằng công cụ cục bộ.
             </div>
         </div>
     </div>
@@ -116,6 +157,7 @@ document.addEventListener('DOMContentLoaded', function() {
     let selectedPartId = null;
     let parts = [];
     let resultText = '';
+    let currentMarkdownContent = ''; // Biến lưu nội dung markdown hiện tại
     
     // Elements
     const fileDropArea = document.getElementById('file-drop-area');
@@ -141,6 +183,9 @@ document.addEventListener('DOMContentLoaded', function() {
     const markdownPreview = document.getElementById('markdown-preview');
     const btnDownloadMd = document.getElementById('btn-download-md');
     const btnDownloadTxt = document.getElementById('btn-download-txt');
+    const btnToWord = document.getElementById('btn-to-word');
+    const outputLoading = document.getElementById('outputLoading');
+    const statusMessage = document.getElementById('status-message');
     
     // Password Toggle
     document.querySelectorAll('.btn-toggle-password').forEach(function(button) {
@@ -253,6 +298,7 @@ document.addEventListener('DOMContentLoaded', function() {
         fileId = null;
         fileName = null;
         parts = [];
+        currentMarkdownContent = '';
     }
     
     function formatFileSize(bytes) {
@@ -641,6 +687,9 @@ document.addEventListener('DOMContentLoaded', function() {
                         resultText = data.result;
                     }
                     
+                    // Update current markdown content for Word conversion
+                    currentMarkdownContent = resultText;
+                    
                     // Update preview
                     markdownPreview.innerHTML = marked.parse(resultText);
                     
@@ -656,6 +705,206 @@ document.addEventListener('DOMContentLoaded', function() {
                 console.error('Error getting result:', error);
             });
     }
+    
+    // Hiển thị thông báo trạng thái
+    function showStatus(message, type) {
+        statusMessage.textContent = message;
+        statusMessage.className = 'status-message ' + type;
+        statusMessage.style.display = 'block';
+        
+        // Tự động ẩn thông báo thành công sau 5 giây
+        if (type === 'success') {
+            setTimeout(() => {
+                statusMessage.style.display = 'none';
+            }, 5000);
+        }
+    }
+    
+    // Hàm chuyển đổi hình ảnh sang base64
+    async function convertImageToBase64(blobUrl, maxWidth = 800, quality = 0.7) {
+      try {
+        // Tải hình ảnh từ blob URL
+        const response = await fetch(blobUrl);
+        const imageBlob = await response.blob();
+        
+        return new Promise((resolve, reject) => {
+          // Tạo một đối tượng Image
+          const img = new Image();
+          img.onload = () => {
+            // Tạo canvas để resize hình ảnh
+            const canvas = document.createElement('canvas');
+            let width = img.width;
+            let height = img.height;
+            
+            // Giảm kích thước nếu cần
+            if (width > maxWidth) {
+              height = Math.floor(height * (maxWidth / width));
+              width = maxWidth;
+            }
+            
+            canvas.width = width;
+            canvas.height = height;
+            
+            // Vẽ hình ảnh đã resize vào canvas
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0, width, height);
+            
+            // Chuyển đổi canvas thành base64 với chất lượng tùy chỉnh
+            const base64 = canvas.toDataURL('image/jpeg', quality);
+            resolve(base64);
+          };
+          
+          img.onerror = () => {
+            // Nếu không thể optimize, trả về dữ liệu gốc dưới dạng base64
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result);
+            reader.onerror = reject;
+            reader.readAsDataURL(imageBlob);
+          };
+          
+          // Thiết lập src cho hình ảnh
+          img.src = URL.createObjectURL(imageBlob);
+        });
+      } catch (error) {
+        console.error('Lỗi khi chuyển đổi hình ảnh sang base64:', error);
+        return null;
+      }
+    }
+    
+    // Hàm chuẩn bị markdown cho Pandoc
+    async function prepareMarkdownForPandoc(markdownContent) {
+      // Regex để tìm tất cả hình ảnh trong markdown
+      const imgRegex = /!\[(.*?)\]\((blob:.*?)\)/g;
+      let result = markdownContent;
+      let matches = [];
+      let match;
+      
+      // Tìm tất cả các blob URL cần thay thế
+      while ((match = imgRegex.exec(markdownContent)) !== null) {
+        matches.push({
+          fullMatch: match[0],
+          altText: match[1],
+          blobUrl: match[2]
+        });
+      }
+      
+      // Log số lượng hình ảnh cần xử lý
+      console.log(`Đang xử lý ${matches.length} hình ảnh...`);
+      
+      // Xử lý từng hình ảnh một - cách tiếp cận tuần tự để tránh quá tải
+      for (const item of matches) {
+        try {
+          // Tối ưu và chuyển đổi hình ảnh (giảm kích thước xuống 600px và chất lượng 60%)
+          const base64 = await convertImageToBase64(item.blobUrl, 600, 0.6);
+          if (base64) {
+            // Thay thế trong nội dung markdown
+            result = result.replace(item.fullMatch, `![${item.altText}](${base64})`);
+          }
+        } catch (err) {
+          console.error(`Không thể xử lý hình ảnh: ${item.blobUrl}`, err);
+        }
+      }
+      
+      return result;
+    }
+    
+    // Hàm chia nội dung thành các phần nhỏ hơn
+    function splitIntoChunks(markdownContent, maxChunkSize = 500000) {
+      const chunks = [];
+      let currentChunk = "";
+      
+      // Tách markdown thành các dòng
+      const lines = markdownContent.split('\n');
+      
+      for (const line of lines) {
+        // Nếu thêm dòng hiện tại vào chunk hiện tại không vượt quá kích thước tối đa
+        if ((currentChunk.length + line.length + 1) <= maxChunkSize) {
+          currentChunk += line + '\n';
+        } else {
+          // Nếu vượt quá, lưu chunk hiện tại và bắt đầu chunk mới
+          chunks.push(currentChunk);
+          currentChunk = line + '\n';
+        }
+      }
+      
+      // Thêm chunk cuối cùng
+      if (currentChunk.length > 0) {
+        chunks.push(currentChunk);
+      }
+      
+      return chunks;
+    }
+    
+    // Hàm chuyển đổi sang word
+    async function convertOutputToWord() {
+      if (!currentMarkdownContent || !currentMarkdownContent.trim()) {
+        alert("Không có kết quả để chuyển sang Word!");
+        return;
+      }
+      
+      outputLoading.style.display = 'block';
+      
+      try {
+        // Hiển thị thông báo và cập nhật trạng thái
+        showStatus('Đang xử lý hình ảnh...', 'info');
+        
+        // Xử lý hình ảnh trước khi gửi đến Pandoc
+        const processedMarkdown = await prepareMarkdownForPandoc(currentMarkdownContent);
+        
+        // Log kích thước của dữ liệu đã xử lý
+        console.log(`Kích thước Markdown sau khi xử lý: ${Math.round(processedMarkdown.length / 1024)} KB`);
+        
+        showStatus('Đang chuyển đổi sang Word...', 'info');
+        
+        const response = await fetch('https://pandoc-api.onrender.com/convert', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/octet-stream'
+          },
+          body: JSON.stringify({ markdown: processedMarkdown })
+        });
+        
+        if (!response.ok) {
+          const errorText = await response.text().catch(() => '');
+          console.error('Pandoc API error:', response.status, errorText);
+          throw new Error(`HTTP error! status: ${response.status}${errorText ? ': ' + errorText : ''}`);
+        }
+        
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        
+        // Tạo tên file có timestamp
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+        a.download = `document_${timestamp}.docx`;
+        
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+        
+        // Hiển thị thông báo thành công
+        showStatus('Xuất file Word thành công!', 'success');
+      } catch (error) {
+        console.error('Error:', error);
+        if (error.message.includes('CORS')) {
+          showStatus('Lỗi CORS: Website hiện tại không được phép gọi API.', 'danger');
+        } else if (error.message.includes('413') || error.message.includes('payload too large')) {
+          showStatus('Lỗi: Nội dung quá lớn để xử lý. Vui lòng giảm số lượng hoặc kích thước hình ảnh.', 'danger');
+        } else if (error.message.includes('500')) {
+          showStatus('Lỗi máy chủ: API Pandoc không thể xử lý yêu cầu. Nội dung có thể quá lớn.', 'danger');
+        } else {
+          showStatus('Có lỗi xảy ra khi chuyển đổi: ' + error.message, 'danger');
+        }
+      } finally {
+        outputLoading.style.display = 'none';
+      }
+    }
+    
+    // Thêm event listener cho nút chuyển sang Word
+    btnToWord.addEventListener('click', convertOutputToWord);
 });
 </script>
 {% endblock %}
