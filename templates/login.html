@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+
+{% block title %}P_Convert - Đăng nhập{% endblock %}
+
+{% block content %}
+<div class="login-container">
+    <div class="login-card">
+        <h1 class="login-title">P_Convert</h1>
+        
+        {% if error %}
+        <div class="alert alert-error">{{ error }}</div>
+        {% endif %}
+        
+        <form class="login-form" method="POST" action="{{ url_for('login') }}">
+            <div class="form-group">
+                <label for="username">Tên đăng nhập</label>
+                <input type="text" id="username" name="username" required autofocus>
+            </div>
+            
+            <div class="form-group">
+                <label for="password">Mật khẩu</label>
+                <input type="password" id="password" name="password" required>
+            </div>
+            
+            <button type="submit" class="btn">Đăng nhập</button>
+        </form>
+        
+        <p class="login-message">Chưa có tài khoản? Vui lòng liên hệ quản trị viên để được cấp.</p>
+    </div>
+</div>
+{% endblock %}
