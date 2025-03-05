@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+
+{% block title %}P_Convert - Trạng thái kích hoạt{% endblock %}
+
+{% block content %}
+<div class="activation-container">
+    <div class="card">
+        <h2 class="card-title">Trạng thái kích hoạt</h2>
+        
+        {% if session.activation_status == "ĐÃ KÍCH HOẠT" %}
+            <div class="alert alert-success">
+                <strong>Tài khoản của bạn đã được kích hoạt!</strong>
+            </div>
+            <div class="hardware-id">{{ session.hardware_id }}</div>
+            <div class="action-buttons">
+                <a href="{{ url_for('dashboard') }}" class="btn">Tiếp tục</a>
+            </div>
+        {% else %}
+            <div class="alert alert-warning">
+                <strong>Tài khoản của bạn chưa được kích hoạt!</strong>
+            </div>
+            <p>Để kích hoạt tài khoản, vui lòng liên hệ quản trị viên và cung cấp Hardware ID dưới đây:</p>
+            <div class="hardware-id">{{ session.hardware_id }}</div>
+            <div class="action-buttons">
+                <a href="{{ url_for('activation_status') }}" class="btn">Kiểm tra lại</a>
+                <a href="{{ url_for('logout') }}" class="btn btn-secondary">Đăng xuất</a>
+            </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
