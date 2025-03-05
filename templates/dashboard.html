@@ -1,0 +1,661 @@
+{% extends "base.html" %}
+
+{% block title %}P_Convert - Dashboard{% endblock %}
+
+{% block head %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/4.3.0/marked.min.js"></script>
+{% endblock %}
+
+{% block content %}
+<div class="main-content">
+    <h1>P_Convert_2025_Special (PDF:Word-Image-Equation)</h1>
+    <p>Công cụ chuyển đổi PDF thành văn bản, hình ảnh và công thức toán học</p>
+    
+    <!-- API Keys Card -->
+    <div class="card">
+        <h2 class="card-title">API Keys</h2>
+        <div class="form-group">
+            <label for="mineru-token">Mineru Token</label>
+            <input type="password" id="mineru-token" placeholder="Nhập Mineru Token...">
+            <button class="btn-toggle-password" data-target="mineru-token">👁</button>
+        </div>
+        <div class="form-group">
+            <label for="gemini-key">Gemini API Key</label>
+            <input type="password" id="gemini-key" placeholder="Nhập Gemini API Key...">
+            <button class="btn-toggle-password" data-target="gemini-key">👁</button>
+        </div>
+    </div>
+    
+    <!-- File Upload Card -->
+    <div class="card">
+        <h2 class="card-title">Upload PDF</h2>
+        <div class="file-drop-area" id="file-drop-area">
+            <p>Kéo thả file PDF vào đây hoặc <strong>Click để chọn file</strong></p>
+            <input type="file" id="file-input" class="file-input" accept=".pdf">
+        </div>
+        
+        <div id="file-info-container" class="hidden">
+            <div class="file-info">
+                <div class="file-name" id="file-name"></div>
+                <div class="file-size" id="file-size"></div>
+                <button class="btn-error" id="btn-remove-file">Xóa</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Tabs Card -->
+    <div class="card" id="processing-options" style="display: none;">
+        <div class="tabs">
+            <div class="tab active" data-tab="full-pdf">Xử lý toàn bộ PDF</div>
+            <div class="tab" data-tab="split-pdf">Tách và xử lý từng phần</div>
+        </div>
+        
+        <!-- Tab Content -->
+        <div class="tab-content active" id="full-pdf-tab">
+            <p>Xử lý toàn bộ file PDF và trích xuất thành văn bản</p>
+            <button class="btn" id="btn-process-all">Upload & Parse (Toàn bộ PDF)</button>
+            <div class="progress-container" id="progress-container-full" style="display: none;">
+                <div class="progress-bar" id="progress-bar-full"></div>
+            </div>
+            <div id="status-text-full" class="status-text"></div>
+        </div>
+        
+        <div class="tab-content" id="split-pdf-tab">
+            <p>Tách PDF thành nhiều phần để xử lý từng phần</p>
+            <button class="btn" id="btn-split-pdf">Tách PDF</button>
+            <div id="parts-container" style="display: none;">
+                <h3>Các phần đã tách</h3>
+                <ul class="parts-list" id="parts-list"></ul>
+                <div class="action-buttons">
+                    <button class="btn" id="btn-process-selected-part">Xử lý phần đã chọn</button>
+                    <button class="btn" id="btn-process-all-parts">Xử lý tất cả các phần</button>
+                </div>
+                <div class="progress-container" id="progress-container-part" style="display: none;">
+                    <div class="progress-bar" id="progress-bar-part"></div>
+                </div>
+                <div id="status-text-part" class="status-text"></div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Results Card -->
+    <div class="card" id="results-card" style="display: none;">
+        <h2 class="card-title">Kết quả</h2>
+        <div class="tabs">
+            <div class="tab active" data-tab="preview">Xem kết quả</div>
+            <div class="tab" data-tab="download">Tải xuống</div>
+        </div>
+        
+        <div class="tab-content active" id="preview-tab">
+            <div class="markdown-preview" id="markdown-preview"></div>
+        </div>
+        
+        <div class="tab-content" id="download-tab">
+            <p>Tải xuống kết quả</p>
+            <div class="action-buttons">
+                <a class="btn" id="btn-download-md">Tải xuống dưới dạng Markdown</a>
+                <a class="btn" id="btn-download-txt">Tải xuống dưới dạng Text</a>
+            </div>
+            <div class="alert alert-info">
+                Lưu ý: Việc chuyển đổi sang Word yêu cầu Pandoc được cài đặt trên máy tính của bạn. 
+                Bạn có thể tải xuống định dạng Markdown và sử dụng các công cụ chuyển đổi như Pandoc.
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Variables
+    let fileId = null;
+    let fileName = null;
+    let fileData = null;
+    let activeTaskId = null;
+    let selectedPartId = null;
+    let parts = [];
+    let resultText = '';
+    
+    // Elements
+    const fileDropArea = document.getElementById('file-drop-area');
+    const fileInput = document.getElementById('file-input');
+    const fileInfoContainer = document.getElementById('file-info-container');
+    const fileNameEl = document.getElementById('file-name');
+    const fileSizeEl = document.getElementById('file-size');
+    const btnRemoveFile = document.getElementById('btn-remove-file');
+    const processingOptions = document.getElementById('processing-options');
+    const btnProcessAll = document.getElementById('btn-process-all');
+    const btnSplitPdf = document.getElementById('btn-split-pdf');
+    const progressContainerFull = document.getElementById('progress-container-full');
+    const progressBarFull = document.getElementById('progress-bar-full');
+    const statusTextFull = document.getElementById('status-text-full');
+    const partsContainer = document.getElementById('parts-container');
+    const partsList = document.getElementById('parts-list');
+    const btnProcessSelectedPart = document.getElementById('btn-process-selected-part');
+    const btnProcessAllParts = document.getElementById('btn-process-all-parts');
+    const progressContainerPart = document.getElementById('progress-container-part');
+    const progressBarPart = document.getElementById('progress-bar-part');
+    const statusTextPart = document.getElementById('status-text-part');
+    const resultsCard = document.getElementById('results-card');
+    const markdownPreview = document.getElementById('markdown-preview');
+    const btnDownloadMd = document.getElementById('btn-download-md');
+    const btnDownloadTxt = document.getElementById('btn-download-txt');
+    
+    // Password Toggle
+    document.querySelectorAll('.btn-toggle-password').forEach(function(button) {
+        button.addEventListener('click', function() {
+            const targetId = this.getAttribute('data-target');
+            const input = document.getElementById(targetId);
+            if (input.type === 'password') {
+                input.type = 'text';
+            } else {
+                input.type = 'password';
+            }
+        });
+    });
+    
+    // Tab Switching
+    document.querySelectorAll('.tab').forEach(function(tab) {
+        tab.addEventListener('click', function() {
+            const tabId = this.getAttribute('data-tab');
+            
+            // Update active tab
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            this.classList.add('active');
+            
+            // Update active tab content
+            document.querySelectorAll('.tab-content').forEach(content => {
+                content.classList.remove('active');
+            });
+            document.getElementById(tabId + '-tab').classList.add('active');
+        });
+    });
+    
+    // File Upload Handling
+    fileDropArea.addEventListener('click', function() {
+        fileInput.click();
+    });
+    
+    fileDropArea.addEventListener('dragover', function(e) {
+        e.preventDefault();
+        fileDropArea.classList.add('dragover');
+    });
+    
+    fileDropArea.addEventListener('dragleave', function() {
+        fileDropArea.classList.remove('dragover');
+    });
+    
+    fileDropArea.addEventListener('drop', function(e) {
+        e.preventDefault();
+        fileDropArea.classList.remove('dragover');
+        
+        if (e.dataTransfer.files.length) {
+            handleFileUpload(e.dataTransfer.files[0]);
+        }
+    });
+    
+    fileInput.addEventListener('change', function() {
+        if (fileInput.files.length) {
+            handleFileUpload(fileInput.files[0]);
+        }
+    });
+    
+    btnRemoveFile.addEventListener('click', function() {
+        resetFileUpload();
+    });
+    
+    function handleFileUpload(file) {
+        if (!file.type || file.type !== 'application/pdf') {
+            alert('Chỉ chấp nhận file PDF!');
+            return;
+        }
+        
+        // Display file info
+        fileName = file.name;
+        fileNameEl.textContent = fileName;
+        fileSizeEl.textContent = formatFileSize(file.size);
+        fileInfoContainer.style.display = 'block';
+        processingOptions.style.display = 'block';
+        
+        // Upload file to server
+        const formData = new FormData();
+        formData.append('pdf_file', file);
+        
+        fetch('/upload', {
+            method: 'POST',
+            body: formData
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                fileId = data.file_id;
+                // Show success message
+                console.log('File uploaded successfully', data);
+            } else {
+                alert(data.error || 'Upload failed');
+                resetFileUpload();
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('Error uploading file');
+            resetFileUpload();
+        });
+    }
+    
+    function resetFileUpload() {
+        fileInput.value = '';
+        fileInfoContainer.style.display = 'none';
+        processingOptions.style.display = 'none';
+        partsContainer.style.display = 'none';
+        resultsCard.style.display = 'none';
+        fileId = null;
+        fileName = null;
+        parts = [];
+    }
+    
+    function formatFileSize(bytes) {
+        if (bytes === 0) return '0 Bytes';
+        
+        const k = 1024;
+        const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    }
+    
+    // Process Full PDF
+    btnProcessAll.addEventListener('click', function() {
+        if (!fileId) {
+            alert('Vui lòng chọn file PDF trước');
+            return;
+        }
+        
+        const mineruToken = document.getElementById('mineru-token').value;
+        const geminiKey = document.getElementById('gemini-key').value;
+        
+        if (!mineruToken) {
+            alert('Vui lòng nhập Mineru Token');
+            return;
+        }
+        
+        // Show progress bar
+        progressContainerFull.style.display = 'block';
+        progressBarFull.style.width = '0%';
+        statusTextFull.textContent = 'Đang bắt đầu xử lý...';
+        btnProcessAll.disabled = true;
+        
+        fetch('/process', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                file_id: fileId,
+                filename: fileName,
+                mineru_token: mineruToken,
+                gemini_key: geminiKey
+            })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                activeTaskId = data.task_id;
+                // Poll for task status
+                pollTaskStatus(activeTaskId, updateFullPdfProgress);
+            } else {
+                alert(data.error || 'Processing failed');
+                progressContainerFull.style.display = 'none';
+                btnProcessAll.disabled = false;
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('Error processing file');
+            progressContainerFull.style.display = 'none';
+            btnProcessAll.disabled = false;
+        });
+    });
+    
+    function updateFullPdfProgress(taskInfo) {
+        progressBarFull.style.width = taskInfo.progress + '%';
+        
+        switch (taskInfo.status) {
+            case 'initialized':
+                statusTextFull.textContent = 'Khởi tạo...';
+                break;
+            case 'uploading':
+                statusTextFull.textContent = 'Đang upload PDF...';
+                break;
+            case 'processing':
+                statusTextFull.textContent = 'Đang xử lý PDF...';
+                break;
+            case 'downloading':
+                statusTextFull.textContent = 'Đang tải kết quả...';
+                break;
+            case 'correcting':
+                statusTextFull.textContent = 'Đang hiệu đính nội dung với Gemini...';
+                break;
+            case 'completed':
+                statusTextFull.textContent = 'Đã hoàn thành!';
+                getTaskResult(activeTaskId);
+                btnProcessAll.disabled = false;
+                break;
+            case 'error':
+                statusTextFull.textContent = 'Lỗi: ' + taskInfo.error;
+                btnProcessAll.disabled = false;
+                break;
+            case 'cancelled':
+                statusTextFull.textContent = 'Đã hủy xử lý';
+                btnProcessAll.disabled = false;
+                break;
+            default:
+                statusTextFull.textContent = 'Đang xử lý...';
+        }
+    }
+    
+    // Split PDF
+    btnSplitPdf.addEventListener('click', function() {
+        if (!fileId) {
+            alert('Vui lòng chọn file PDF trước');
+            return;
+        }
+        
+        btnSplitPdf.disabled = true;
+        statusTextPart.textContent = 'Đang tách PDF...';
+        
+        fetch('/split-pdf', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                file_id: fileId,
+                filename: fileName
+            })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                parts = data.parts;
+                
+                // Display parts list
+                partsList.innerHTML = '';
+                parts.forEach(part => {
+                    const li = document.createElement('li');
+                    li.className = 'part-item';
+                    li.dataset.partId = part.id;
+                    li.textContent = part.name;
+                    li.addEventListener('click', function() {
+                        // Select part
+                        document.querySelectorAll('.part-item').forEach(item => {
+                            item.classList.remove('selected');
+                        });
+                        this.classList.add('selected');
+                        selectedPartId = part.id;
+                    });
+                    partsList.appendChild(li);
+                });
+                
+                partsContainer.style.display = 'block';
+                statusTextPart.textContent = 'PDF đã được tách thành ' + parts.length + ' phần';
+            } else {
+                alert(data.error || 'Split failed');
+            }
+            btnSplitPdf.disabled = false;
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('Error splitting file');
+            btnSplitPdf.disabled = false;
+        });
+    });
+    
+    // Process Selected Part
+    btnProcessSelectedPart.addEventListener('click', function() {
+        if (!selectedPartId) {
+            alert('Vui lòng chọn một phần để xử lý');
+            return;
+        }
+        
+        processSelectedPart(selectedPartId);
+    });
+    
+    function processSelectedPart(partId) {
+        const mineruToken = document.getElementById('mineru-token').value;
+        const geminiKey = document.getElementById('gemini-key').value;
+        
+        if (!mineruToken) {
+            alert('Vui lòng nhập Mineru Token');
+            return;
+        }
+        
+        // Show progress
+        progressContainerPart.style.display = 'block';
+        progressBarPart.style.width = '0%';
+        statusTextPart.textContent = 'Đang bắt đầu xử lý phần ' + partId + '...';
+        btnProcessSelectedPart.disabled = true;
+        btnProcessAllParts.disabled = true;
+        
+        fetch('/process-part', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                file_id: fileId,
+                part_id: partId,
+                mineru_token: mineruToken,
+                gemini_key: geminiKey
+            })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                activeTaskId = data.task_id;
+                // Poll for task status
+                pollTaskStatus(activeTaskId, updatePartProgress);
+            } else {
+                alert(data.error || 'Processing failed');
+                progressContainerPart.style.display = 'none';
+                btnProcessSelectedPart.disabled = false;
+                btnProcessAllParts.disabled = false;
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('Error processing part');
+            progressContainerPart.style.display = 'none';
+            btnProcessSelectedPart.disabled = false;
+            btnProcessAllParts.disabled = false;
+        });
+    }
+    
+    // Process All Parts
+    btnProcessAllParts.addEventListener('click', function() {
+        if (parts.length === 0) {
+            alert('Không có phần nào để xử lý');
+            return;
+        }
+        
+        // Reset result text before processing all parts
+        resultText = '';
+        
+        // Process first part
+        processAllPartsSequentially(0);
+    });
+    
+    function processAllPartsSequentially(index) {
+        if (index >= parts.length) {
+            // All parts are processed
+            btnProcessSelectedPart.disabled = false;
+            btnProcessAllParts.disabled = false;
+            return;
+        }
+        
+        const partId = parts[index].id;
+        const mineruToken = document.getElementById('mineru-token').value;
+        const geminiKey = document.getElementById('gemini-key').value;
+        
+        if (!mineruToken) {
+            alert('Vui lòng nhập Mineru Token');
+            return;
+        }
+        
+        // Show progress
+        progressContainerPart.style.display = 'block';
+        progressBarPart.style.width = '0%';
+        statusTextPart.textContent = `Đang xử lý phần ${index+1}/${parts.length}...`;
+        btnProcessSelectedPart.disabled = true;
+        btnProcessAllParts.disabled = true;
+        
+        fetch('/process-part', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                file_id: fileId,
+                part_id: partId,
+                mineru_token: mineruToken,
+                gemini_key: geminiKey
+            })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                activeTaskId = data.task_id;
+                
+                // Set up callback for when this part is done
+                const originalPollCallback = pollTaskStatus(activeTaskId, updatePartProgress, () => {
+                    // After this part is done, process the next part
+                    setTimeout(() => {
+                        processAllPartsSequentially(index + 1);
+                    }, 1000);
+                });
+            } else {
+                alert(data.error || 'Processing failed');
+                progressContainerPart.style.display = 'none';
+                btnProcessSelectedPart.disabled = false;
+                btnProcessAllParts.disabled = false;
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('Error processing parts');
+            progressContainerPart.style.display = 'none';
+            btnProcessSelectedPart.disabled = false;
+            btnProcessAllParts.disabled = false;
+        });
+    }
+    
+    function updatePartProgress(taskInfo) {
+        progressBarPart.style.width = taskInfo.progress + '%';
+        
+        switch (taskInfo.status) {
+            case 'initialized':
+                statusTextPart.textContent = 'Khởi tạo...';
+                break;
+            case 'uploading':
+                statusTextPart.textContent = 'Đang upload PDF...';
+                break;
+            case 'processing':
+                statusTextPart.textContent = 'Đang xử lý PDF...';
+                break;
+            case 'downloading':
+                statusTextPart.textContent = 'Đang tải kết quả...';
+                break;
+            case 'correcting':
+                statusTextPart.textContent = 'Đang hiệu đính nội dung với Gemini...';
+                break;
+            case 'completed':
+                statusTextPart.textContent = 'Đã hoàn thành!';
+                getTaskResult(activeTaskId, true);
+                btnProcessSelectedPart.disabled = false;
+                btnProcessAllParts.disabled = false;
+                break;
+            case 'error':
+                statusTextPart.textContent = 'Lỗi: ' + taskInfo.error;
+                btnProcessSelectedPart.disabled = false;
+                btnProcessAllParts.disabled = false;
+                break;
+            case 'cancelled':
+                statusTextPart.textContent = 'Đã hủy xử lý';
+                btnProcessSelectedPart.disabled = false;
+                btnProcessAllParts.disabled = false;
+                break;
+            default:
+                statusTextPart.textContent = 'Đang xử lý...';
+        }
+    }
+    
+    // Task Status Polling
+    function pollTaskStatus(taskId, updateCallback, completionCallback = null) {
+        const poll = () => {
+            fetch(`/task-status/${taskId}`)
+                .then(response => response.json())
+                .then(taskInfo => {
+                    updateCallback(taskInfo);
+                    
+                    if (['completed', 'error', 'cancelled'].includes(taskInfo.status)) {
+                        if (completionCallback) {
+                            completionCallback();
+                        }
+                        return;
+                    }
+                    
+                    // Continue polling
+                    setTimeout(poll, 1000);
+                })
+                .catch(error => {
+                    console.error('Error polling task status:', error);
+                    // Retry after a delay
+                    setTimeout(poll, 2000);
+                });
+        };
+        
+        // Start polling
+        poll();
+    }
+    
+    // Get Task Result
+    function getTaskResult(taskId, append = false) {
+        fetch(`/task-result/${taskId}`)
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    if (append) {
+                        // Append result to existing text
+                        if (resultText) {
+                            resultText += '\n\n';
+                        }
+                        
+                        if (data.part_name) {
+                            resultText += `--- Kết quả từ ${data.part_name} ---\n`;
+                        }
+                        
+                        resultText += data.result;
+                    } else {
+                        // Replace existing result
+                        resultText = data.result;
+                    }
+                    
+                    // Update preview
+                    markdownPreview.innerHTML = marked.parse(resultText);
+                    
+                    // Update download links
+                    btnDownloadMd.href = `/download/${taskId}/markdown`;
+                    btnDownloadTxt.href = `/download/${taskId}/text`;
+                    
+                    // Show results card
+                    resultsCard.style.display = 'block';
+                }
+            })
+            .catch(error => {
+                console.error('Error getting result:', error);
+            });
+    }
+});
+</script>
+{% endblock %}
