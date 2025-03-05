@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}P_Convert_2025_Special{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    {% block head %}{% endblock %}
+</head>
+<body>
+    {% if session.logged_in %}
+    <header class="header">
+        <div class="container">
+            <div class="header-content">
+                <div class="logo">P_Convert<span>_2025_Special</span></div>
+                <div class="user-info">
+                    <div class="user-badge">{{ session.username }}</div>
+                    <div class="user-badge">{{ session.activation_status }}</div>
+                    <a href="{{ url_for('logout') }}" class="logout-btn">Đăng xuất</a>
+                </div>
+            </div>
+        </div>
+    </header>
+    {% endif %}
+
+    <div class="container">
+        {% block content %}{% endblock %}
+    </div>
+
+    {% block scripts %}{% endblock %}
+</body>
+</html>
